@@ -141,7 +141,14 @@
                 this.updateStatus('YouTube player ready. Generating first TV...');
                 document.getElementById('loadingText').style.display = 'none';
                 event.target.playVideo();
-                this.generateNewTV();
+                
+                // Add delay and error handling for first TV generation
+                setTimeout(() => {
+                    this.generateNewTV().catch(() => {
+                        this.updateStatus('Initial generation failed, using fallback...');
+                        this.useFallbackTV();
+                    });
+                }, 1000);
             }
             
             onPlayerStateChange(event) {
@@ -154,6 +161,7 @@
                 this.updateStatus(`Generating TV image (depth: ${this.recursionDepth})...`);
                 
                 try {
+                    // Add timeout to image generation
                     const tvPrompts = [
                         "A vintage CRT television with a bright white rectangular screen, black plastic frame, sitting on a wooden table, front view, photorealistic",
                         "An old-school TV set with a glowing white screen, dark border, retro design, centered view, high contrast",
@@ -163,26 +171,72 @@
                     
                     const prompt = tvPrompts[this.recursionDepth % tvPrompts.length];
                     
-                    const result = await websim.imageGen({
+                    // Add timeout wrapper
+                    const imageGenPromise = websim.imageGen({
                         prompt: prompt,
                         aspect_ratio: "16:9",
                         width: 1024,
                         height: 576
                     });
                     
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Image generation timeout')), 15000)
+                    );
+                    
+                    const result = await Promise.race([imageGenPromise, timeoutPromise]);
+                    
                     this.updateStatus('Processing TV image...');
                     await this.processAndDisplayTV(result.url);
                     
                 } catch (error) {
                     console.error('Error generating TV:', error);
-                    this.updateStatus('Error generating TV. Retrying...');
-                    setTimeout(() => this.generateNewTV(), 2000);
+                    this.updateStatus('Error generating TV. Using fallback...');
+                    // Use fallback method
+                    this.useFallbackTV();
+                }
+            }
+            
+            useFallbackTV() {
+                // Create a simple TV frame manually as fallback
+                this.updateStatus('Creating fallback TV frame...');
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = 1024;
+                tempCanvas.height = 576;
+                
+                // Draw a simple TV frame
+                tempCtx.fillStyle = '#333';
+                tempCtx.fillRect(0, 0, 1024, 576);
+                
+                // Create transparent center area for the screen
+                tempCtx.globalCompositeOperation = 'destination-out';
+                tempCtx.fillRect(150, 100, 724, 376);
+                tempCtx.globalCompositeOperation = 'source-over';
+                
+                this.currentTVImage = {
+                    canvas: tempCanvas,
+                    width: tempCanvas.width,
+                    height: tempCanvas.height
+                };
+                
+                this.zoomLevel = 1;
+                this.drawScene();
+                this.updateStatus('Fallback TV ready. Starting zoom...');
+                
+                if (!this.isZooming) {
+                    this.startZoomLoop();
                 }
             }
             
             async processAndDisplayTV(imageUrl) {
                 try {
-                    const processedImageData = await this.processImageWithRetry(imageUrl);
+                    // Add timeout to image processing
+                    const processPromise = this.processImageWithRetry(imageUrl);
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Image processing timeout')), 10000)
+                    );
+                    
+                    const processedImageData = await Promise.race([processPromise, timeoutPromise]);
                     this.currentTVImage = processedImageData;
                     this.zoomLevel = 1;
                     this.drawScene();
@@ -202,13 +256,19 @@
                 
                 try {
                     const proxy = this.corsProxies[proxyIndex];
-                    const proxiedUrl = proxy + imageUrl;
+                    const proxiedUrl = proxyIndex === this.corsProxies.length - 1 ? imageUrl : proxy + imageUrl;
                     
                     return await new Promise((resolve, reject) => {
+                        // Add timeout for individual image loads
+                        const timeout = setTimeout(() => {
+                            reject(new Error(`Image load timeout for proxy ${proxyIndex}`));
+                        }, 5000);
+                        
                         const img = new Image();
                         img.crossOrigin = 'anonymous';
                         
                         img.onload = () => {
+                            clearTimeout(timeout);
                             try {
                                 const tempCanvas = document.createElement('canvas');
                                 const tempCtx = tempCanvas.getContext('2d');
@@ -233,6 +293,7 @@
                         };
                         
                         img.onerror = () => {
+                            clearTimeout(timeout);
                             reject(new Error(`Failed to load image with proxy ${proxyIndex}`));
                         };
                         
@@ -240,8 +301,12 @@
                     });
                     
                 } catch (error) {
-                    console.log(`Proxy ${proxyIndex} failed, trying next...`);
-                    return this.processImageWithRetry(imageUrl, proxyIndex + 1);
+                    console.log(`Proxy ${proxyIndex} failed:`, error.message);
+                    if (proxyIndex < this.corsProxies.length - 1) {
+                        return this.processImageWithRetry(imageUrl, proxyIndex + 1);
+                    } else {
+                        throw error;
+                    }
                 }
             }
             
@@ -334,4 +399,3 @@
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-
