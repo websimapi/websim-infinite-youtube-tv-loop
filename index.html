@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite YouTube TV Loop</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #mainCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+        
+        #youtubePlayer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 560px;
+            height: 315px;
+            z-index: 5;
+        }
+        
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            font-size: 12px;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            z-index: 200;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="status">Initializing...</div>
+        <div class="loading" id="loadingText">Loading infinite loop...</div>
+        <canvas id="mainCanvas"></canvas>
+        <div id="youtubePlayer"></div>
+    </div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+        class InfiniteYouTubeLoop {
+            constructor() {
+                this.canvas = document.getElementById('mainCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.player = null;
+                this.currentTVImage = null;
+                this.zoomLevel = 1;
+                this.maxZoom = 100;
+                this.zoomSpeed = 0.02;
+                this.isZooming = false;
+                this.recursionDepth = 0;
+                this.maxRecursionDepth = 10;
+                this.corsProxies = [
+                    'https://cors-anywhere.herokuapp.com/',
+                    'https://api.allorigins.win/raw?url=',
+                    'https://corsproxy.io/?',
+                    ''
+                ];
+                this.currentProxyIndex = 0;
+                
+                this.setupCanvas();
+                this.initYouTube();
+                this.updateStatus('Waiting for YouTube player...');
+            }
+            
+            setupCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                
+                window.addEventListener('resize', () => {
+                    this.canvas.width = window.innerWidth;
+                    this.canvas.height = window.innerHeight;
+                });
+            }
+            
+            initYouTube() {
+                window.onYouTubeIframeAPIReady = () => {
+                    this.player = new YT.Player('youtubePlayer', {
+                        height: '315',
+                        width: '560',
+                        videoId: 'dQw4w9WgXcQ', // Rick Roll for the infinite loop
+                        playerVars: {
+                            'autoplay': 1,
+                            'loop': 1,
+                            'playlist': 'dQw4w9WgXcQ',
+                            'controls': 0,
+                            'showinfo': 0,
+                            'rel': 0,
+                            'iv_load_policy': 3,
+                            'modestbranding': 1
+                        },
+                        events: {
+                            'onReady': this.onPlayerReady.bind(this),
+                            'onStateChange': this.onPlayerStateChange.bind(this)
+                        }
+                    });
+                };
+            }
+            
+            onPlayerReady(event) {
+                this.updateStatus('YouTube player ready. Generating first TV...');
+                document.getElementById('loadingText').style.display = 'none';
+                event.target.playVideo();
+                this.generateNewTV();
+            }
+            
+            onPlayerStateChange(event) {
+                if (event.data === YT.PlayerState.PLAYING && !this.isZooming) {
+                    this.startZoomLoop();
+                }
+            }
+            
+            async generateNewTV() {
+                this.updateStatus(`Generating TV image (depth: ${this.recursionDepth})...`);
+                
+                try {
+                    const tvPrompts = [
+                        "A vintage CRT television with a bright white rectangular screen, black plastic frame, sitting on a wooden table, front view, photorealistic",
+                        "An old-school TV set with a glowing white screen, dark border, retro design, centered view, high contrast",
+                        "Classic television with a pure white display screen, black bezel, vintage style, direct front angle",
+                        "Retro CRT monitor with bright white screen area, dark plastic casing, old-fashioned TV design"
+                    ];
+                    
+                    const prompt = tvPrompts[this.recursionDepth % tvPrompts.length];
+                    
+                    const result = await websim.imageGen({
+                        prompt: prompt,
+                        aspect_ratio: "16:9",
+                        width: 1024,
+                        height: 576
+                    });
+                    
+                    this.updateStatus('Processing TV image...');
+                    await this.processAndDisplayTV(result.url);
+                    
+                } catch (error) {
+                    console.error('Error generating TV:', error);
+                    this.updateStatus('Error generating TV. Retrying...');
+                    setTimeout(() => this.generateNewTV(), 2000);
+                }
+            }
+            
+            async processAndDisplayTV(imageUrl) {
+                try {
+                    const processedImageData = await this.processImageWithRetry(imageUrl);
+                    this.currentTVImage = processedImageData;
+                    this.zoomLevel = 1;
+                    this.drawScene();
+                    this.updateStatus('TV processed. Starting zoom...');
+                    
+                } catch (error) {
+                    console.error('Error processing TV image:', error);
+                    this.updateStatus('Error processing image. Retrying...');
+                    setTimeout(() => this.generateNewTV(), 2000);
+                }
+            }
+            
+            async processImageWithRetry(imageUrl, proxyIndex = 0) {
+                if (proxyIndex >= this.corsProxies.length) {
+                    throw new Error('All CORS proxies failed');
+                }
+                
+                try {
+                    const proxy = this.corsProxies[proxyIndex];
+                    const proxiedUrl = proxy + imageUrl;
+                    
+                    return await new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.crossOrigin = 'anonymous';
+                        
+                        img.onload = () => {
+                            try {
+                                const tempCanvas = document.createElement('canvas');
+                                const tempCtx = tempCanvas.getContext('2d');
+                                tempCanvas.width = img.width;
+                                tempCanvas.height = img.height;
+                                
+                                tempCtx.drawImage(img, 0, 0);
+                                const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                                
+                                // Process image to make white areas transparent
+                                const processed = this.makeWhiteTransparent(imageData);
+                                tempCtx.putImageData(processed, 0, 0);
+                                
+                                resolve({
+                                    canvas: tempCanvas,
+                                    width: tempCanvas.width,
+                                    height: tempCanvas.height
+                                });
+                            } catch (error) {
+                                reject(error);
+                            }
+                        };
+                        
+                        img.onerror = () => {
+                            reject(new Error(`Failed to load image with proxy ${proxyIndex}`));
+                        };
+                        
+                        img.src = proxiedUrl;
+                    });
+                    
+                } catch (error) {
+                    console.log(`Proxy ${proxyIndex} failed, trying next...`);
+                    return this.processImageWithRetry(imageUrl, proxyIndex + 1);
+                }
+            }
+            
+            makeWhiteTransparent(imageData) {
+                const data = imageData.data;
+                const threshold = 200; // Brightness threshold for "white"
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    
+                    // Check if pixel is mostly white/bright
+                    if (r > threshold && g > threshold && b > threshold) {
+                        const brightness = (r + g + b) / 3;
+                        if (brightness > threshold) {
+                            data[i + 3] = 0; // Make transparent
+                        }
+                    }
+                }
+                
+                return imageData;
+            }
+            
+            drawScene() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                if (this.currentTVImage) {
+                    const centerX = this.canvas.width / 2;
+                    const centerY = this.canvas.height / 2;
+                    
+                    // Calculate scaled dimensions
+                    const scale = Math.min(this.canvas.width / this.currentTVImage.width, 
+                                         this.canvas.height / this.currentTVImage.height) * this.zoomLevel;
+                    
+                    const scaledWidth = this.currentTVImage.width * scale;
+                    const scaledHeight = this.currentTVImage.height * scale;
+                    
+                    const x = centerX - scaledWidth / 2;
+                    const y = centerY - scaledHeight / 2;
+                    
+                    this.ctx.drawImage(this.currentTVImage.canvas, x, y, scaledWidth, scaledHeight);
+                }
+            }
+            
+            startZoomLoop() {
+                if (this.isZooming) return;
+                this.isZooming = true;
+                this.updateStatus('Zooming into infinity...');
+                this.zoomAnimation();
+            }
+            
+            zoomAnimation() {
+                if (!this.isZooming) return;
+                
+                this.zoomLevel += this.zoomSpeed;
+                this.drawScene();
+                
+                // Check if we've zoomed in enough (1px of frame showing)
+                const frameSize = Math.min(this.canvas.width, this.canvas.height) / this.zoomLevel;
+                
+                if (frameSize <= 1 || this.zoomLevel >= this.maxZoom) {
+                    this.isZooming = false;
+                    this.recursionDepth++;
+                    
+                    if (this.recursionDepth < this.maxRecursionDepth) {
+                        this.updateStatus('Reached zoom limit. Generating new TV...');
+                        setTimeout(() => this.generateNewTV(), 1000);
+                    } else {
+                        this.updateStatus('Maximum recursion reached. Restarting...');
+                        this.recursionDepth = 0;
+                        setTimeout(() => this.generateNewTV(), 2000);
+                    }
+                } else {
+                    requestAnimationFrame(() => this.zoomAnimation());
+                }
+            }
+            
+            updateStatus(message) {
+                document.getElementById('status').textContent = message;
+                console.log(message);
+            }
+        }
+        
+        // Start the infinite loop when page loads
+        window.addEventListener('load', () => {
+            new InfiniteYouTubeLoop();
+        });
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
